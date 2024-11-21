@@ -1,0 +1,6 @@
+ML Trained Model,Best Set of Parameter Values,MCC-score on Testing Data (20%)
+MLP,"{'activation': 'relu', 'early_stopping': True, 'hidden_layer_sizes': (100, 50), 'learning_rate': 'constant', 'max_iter': 2000}",0.6300260870554253
+SVC,"{'C': 10, 'gamma': 'scale', 'kernel': 'rbf'}",0.7461289513322565
+KNN,"{'algorithm': 'auto', 'n_neighbors': 10, 'p': 2}",0.707640387200323
+DecisionTree,"{'ccp_alpha': 0.0, 'criterion': 'entropy', 'max_depth': 5}",0.8357698854145772
+LogisticRegression,"{'max_iter': 5000, 'penalty': 'l2', 'solver': 'lbfgs'}",0.5594890746091223

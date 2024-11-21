@@ -1,79 +1,206 @@
-
 import pandas as pd
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
 from imblearn.under_sampling import RandomUnderSampler
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import GridSearchCV
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import matthews_corrcoef, make_scorer
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import make_scorer, matthews_corrcoef
-from sklearn.metrics import matthews_corrcoef
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
-def preprocess_data(data):
-    # Separate features and target
-    # Separate features and target
-    X = data[['Type', 'Air temperature [K]', 'Process temperature [K]', 
-              'Rotational speed [rpm]', 'Torque [Nm]', 'Tool wear [min]']]
-    y = data['Machine failure']
+# (3). Filter six attributes
+def filterData():
+    """
+    Reads the CSV file and filters the required attributes.
 
-    # One-Hot Encode the "Type" column
-    encoder = OneHotEncoder(sparse_output=False, drop='first')  # Updated parameter name
-    type_encoded = encoder.fit_transform(X[['Type']])
-    type_encoded_df = pd.DataFrame(type_encoded, columns=encoder.get_feature_names_out(['Type']))
+    Returns:
+    pd.DataFrame: Filtered data.
+    """
+    try:
+        data = pd.read_csv('ai4i2020.csv')
+        selectedData = data[['Type', 'Air temperature [K]', 'Process temperature [K]', 'Rotational speed [rpm]', 
+                          'Torque [Nm]', 'Tool wear [min]', 'Machine failure']]
+        return selectedData
+    except FileNotFoundError as e:
+        logging.error("File not found: %s", e)
+        return None
 
-    # Drop the original "Type" column and concatenate encoded columns
-    X = X.drop(columns=['Type']).reset_index(drop=True)
-    X = pd.concat([X, type_encoded_df], axis=1)
+# (4). Data preprocessing 
+def preprocessData():
+    
+    selectedData = filterData()
+    encoder = LabelEncoder()
+    scaler = StandardScaler()
+    selectedData['Type'] = encoder.fit_transform(selectedData['Type'])  
+    scaledData = scaler.fit_transform(selectedData.drop('Machine failure', axis=1))
+    return pd.DataFrame(scaledData, columns=selectedData.drop('Machine failure', axis=1).columns)
 
-    return X, y
+# (5). RandomUnderSampler data balancing
+def dataBalance():
+    """
+    Balances the dataset using RandomUnderSampler to address class imbalance.
 
+    Returns:
+    pd.DataFrame: Balanced dataset with target and features.
+    """
+    selectedData = filterData()
+    scaledData = preprocessData()
+    X = scaledData
+    y = selectedData['Machine failure']
+    rus = RandomUnderSampler(sampling_strategy={0: 339, 1: 339}, random_state=42)
+    X_res, y_res = rus.fit_resample(X, y)
+    balancedData = pd.DataFrame(X_res, columns=scaledData.columns)
+    balancedData['Machine failure'] = y_res
+    return balancedData
+
+# (6). 5-fold cross-validation 
+def crossValidation(X_train, y_train):
+    """"
+    Defines hyperparameter grids for various machine learning models.
+
+    Parameters:
+    X_train (pd.DataFrame): Training data features.
+    y_train (pd.Series): Training data labels.
+    """
+    param_grids = {
+        'MLP': {
+            'hidden_layer_sizes': [(50,), (100,), (100, 50), (150,)],
+            'activation': ['relu', 'tanh'],
+            'learning_rate': ['constant', 'adaptive'],
+            'max_iter': [2000],
+            'early_stopping': [True],
+        },
+        'SVC': {
+            'C': [0.1, 1, 10],
+            'kernel': ['linear', 'rbf'],
+            'gamma': ['scale', 'auto']
+        },
+        'KNN': {
+            'n_neighbors': [3, 5, 7, 10],
+            'p': [1, 2],
+            'algorithm': ['auto', 'ball_tree', 'kd_tree', 'brute']
+        },
+        'DecisionTree': {
+            'criterion': ['gini', 'entropy'],
+            'max_depth': [None, 5, 10, 20],
+            'ccp_alpha': [0.0, 0.1, 0.2]
+        },
+        'LogisticRegression': {
+            'penalty': ['l2'],  
+            'max_iter': [5000],
+            'solver': ['lbfgs', 'liblinear']  
+        }
+    }
+
+    models = {
+        'MLP': MLPClassifier(max_iter=2000, early_stopping=True),
+        'SVC': SVC(),
+        'KNN': KNeighborsClassifier(),
+        'DecisionTree': DecisionTreeClassifier(),
+        'LogisticRegression': LogisticRegression()
+    }
+
+    results = []
+    bestParameters = {}
+
+    for modelName in models:
+        print(f"Training {modelName} model...")
+        grid_search = GridSearchCV(models[modelName], param_grids[modelName], cv=5, scoring=make_scorer(matthews_corrcoef))
+        grid_search.fit(X_train, y_train)
+
+        bestParameters[modelName] = grid_search.best_params_
+        best_score = grid_search.best_score_
+
+        results.append([modelName, bestParameters[modelName], best_score])
+
+    results_df = pd.DataFrame(results, columns=["ML Trained Model", "Best Set of Parameter Values", "MCC Score (5-Fold CV)"])
+    results_df.to_csv("Table_1.csv", index=False)
+    print("\n" + str(results_df))
+
+    return bestParameters
+
+# (7) Evaluate models on the test set
+def evaluate_models(X_train, X_test, y_train, y_test, models, best_params):
+    """
+    Evaluates models using the provided training and test data.
+
+    Parameters:
+    X_train (pd.DataFrame): Training data features.
+    X_test (pd.DataFrame): Test data features.
+    y_train (pd.Series): Training data labels.
+    y_test (pd.Series): Test data labels.
+    models (dict): Dictionary of models to evaluate.
+    param_grids (dict): Dictionary of hyperparameter grids for each model.
+    """
+    testResults = []
+
+    for model_name in models:
+        print(f"Evaluating {model_name} model on test set...")
+        
+        model = models[model_name].set_params(**best_params[model_name])
+        
+        model.fit(X_train, y_train)
+        
+        y_predict = model.predict(X_test)
+        mcc_score = matthews_corrcoef(y_test, y_predict)
+        
+        testResults.append([model_name, best_params[model_name], mcc_score])
+    
+    results_df = pd.DataFrame(testResults, columns=["ML Trained Model", "Best Set of Parameter Values", "MCC-score on Testing Data (20%)"])
+    results_df.to_csv("Table_2.csv", index=False)
+    print("\n" + str(results_df))
+    
+    best_model_row = results_df.loc[results_df['MCC-score on Testing Data (20%)'].idxmax()]
+    print(f"\nThe model with the highest MCC score is: {best_model_row['ML Trained Model']} with a score of {best_model_row['MCC-score on Testing Data (20%)']}")
 
 def main():
-    
-    
-    data = pd.read_csv("ai4i2020.csv")
-    X, y = preprocess_data(data)
-    print("Preprocessed Features:\n", X.head())
-    print("Target Variable:\n", y.head())
-  
-    data = pd.get_dummies(data, columns=['Type'], drop_first=True)
-    
-    scaler = StandardScaler()
-    numeric_features = ['Air temperature [K]', 'Process temperature [K]', 'Rotational speed [rpm]', 'Torque [Nm]', 'Tool wear [min]']
-    data[numeric_features] = scaler.fit_transform(data[numeric_features])
-    
-    X = data.drop(columns=['Machine failure'])
-    y = data['Machine failure']
-    sampler = RandomUnderSampler()
-    X_resampled, y_resampled = sampler.fit_resample(X, y)   
-    
-    X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.2, random_state=42)
-    
-    scorer = make_scorer(matthews_corrcoef)
+    # (3). Filter six attributes
+    print("Part 3: Filtered Data")
+    filtered_data = filterData()
+    print(filtered_data.head())  
+    print("\n")
 
-    param_grid = {
-        'hidden_layer_sizes': [(50,), (100,), (50, 50)],
-        'activation': ['relu', 'tanh'],
-        'learning_rate': ['constant', 'adaptive']
+    # (4). Preprocessed Data
+    print("Part 4: Preprocessed Data")
+    preprocessed_data = preprocessData()
+    print(preprocessed_data.head())  
+    print("\n")
+
+    # (5) Balanced Data
+    print("Part 5: Balanced Data")
+    balanced_data = dataBalance()
+    print(balanced_data.head()) 
+    print("\n")
+
+    # (6) Cross-validation for model tuning
+    print("Part 6: Cross-validation for Model Tuning")
+    X = balanced_data.drop('Machine failure', axis=1)
+    y = balanced_data['Machine failure']
+    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+    
+    best_params = crossValidation(X_train, y_train)
+    
+    print("\n")
+
+    # (7). Model Evaluation
+    print("Part 7: Model Evaluation on the Test Set")
+    models = {
+        'MLP': MLPClassifier(),
+        'SVC': SVC(),
+        'KNN': KNeighborsClassifier(),
+        'DecisionTree': DecisionTreeClassifier(),
+        'LogisticRegression': LogisticRegression()
     }
-    grid_search = GridSearchCV(MLPClassifier(max_iter=1000), param_grid, scoring=scorer, cv=5)
-    grid_search.fit(X_train, y_train)
 
-    print("Best parameters:", grid_search.best_params_)
-    print("MCC score:", grid_search.best_score_)
+    evaluate_models(X_train, X_test, y_train, y_test, models, best_params)
     
-    best_model = grid_search.best_estimator_
-    y_pred = best_model.predict(X_test)
-    mcc = matthews_corrcoef(y_test, y_pred)
-    print("Test MCC:", mcc)
-
-    # Step 1: Load and preprocess data
-    # Step 2: Balance data using RandomUnderSampler
-    # Step 3: Split data into training and testing sets
-    # Step 4: Train and fine-tune models using cross-validation
-    # Step 5: Evaluate models on the test set
-    # Step 6: Output Table 1 and Table 2
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

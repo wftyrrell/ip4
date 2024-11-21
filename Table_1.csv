@@ -1,0 +1,6 @@
+ML Trained Model,Best Set of Parameter Values,MCC Score (5-Fold CV)
+MLP,"{'activation': 'relu', 'early_stopping': True, 'hidden_layer_sizes': (100, 50), 'learning_rate': 'constant', 'max_iter': 2000}",0.6512497550560769
+SVC,"{'C': 10, 'gamma': 'scale', 'kernel': 'rbf'}",0.8026430780768488
+KNN,"{'algorithm': 'auto', 'n_neighbors': 10, 'p': 2}",0.7294704249705906
+DecisionTree,"{'ccp_alpha': 0.0, 'criterion': 'entropy', 'max_depth': 5}",0.7883195096039955
+LogisticRegression,"{'max_iter': 5000, 'penalty': 'l2', 'solver': 'lbfgs'}",0.6355862910317249
